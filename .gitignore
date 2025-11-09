@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environments
+venv/
+env/
+ENV/
+
+# Environment Variables
+.env
+.env.local
+
+# Databases
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Reports
+backend/reports/
+
+# ChromaDB
+backend/data/chromadb/
+
+# Checkpoints
+backend/data/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Poetry (cache is global, lock file should be committed)
+poetry.lock
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Project Planning (internal documentation)
+.project/
