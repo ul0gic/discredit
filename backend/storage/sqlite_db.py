@@ -123,6 +123,35 @@ class DiscreditDB:
             )
         """)
 
+        # Clustering runs table - metadata for each clustering execution
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS clustering_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                method TEXT NOT NULL,
+                parameters TEXT NOT NULL,
+                n_clusters INTEGER NOT NULL,
+                n_noise INTEGER NOT NULL,
+                n_samples INTEGER NOT NULL,
+                silhouette_score REAL,
+                quality_metrics TEXT,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        # Message clusters table - cluster assignments
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS message_clusters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                clustering_run_id INTEGER NOT NULL,
+                message_id TEXT NOT NULL,
+                cluster_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (clustering_run_id) REFERENCES clustering_runs(id),
+                FOREIGN KEY (message_id) REFERENCES messages(id),
+                UNIQUE(clustering_run_id, message_id)
+            )
+        """)
+
         # Create indexes for common query patterns
         self._create_indexes(cursor)
 
@@ -150,6 +179,12 @@ class DiscreditDB:
 
         # Embeddings index
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_message ON embeddings_reference(message_id)")
+
+        # Clustering indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_clustering_runs_method ON clustering_runs(method)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_run ON message_clusters(clustering_run_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_message ON message_clusters(message_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_cluster ON message_clusters(cluster_id)")
 
     # ==================== MESSAGES CRUD ====================
 
@@ -660,6 +695,139 @@ class DiscreditDB:
             }
 
         return stats
+
+    # ==================== CLUSTERING OPERATIONS ====================
+
+    def save_clustering_run(
+        self,
+        method: str,
+        parameters: Dict[str, Any],
+        n_clusters: int,
+        n_noise: int,
+        n_samples: int,
+        silhouette_score: Optional[float] = None,
+        quality_metrics: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """
+        Save clustering run metadata.
+
+        Args:
+            method: Clustering method name (e.g., 'hdbscan', 'kmeans')
+            parameters: Dict of clustering parameters
+            n_clusters: Number of clusters found
+            n_noise: Number of noise points
+            n_samples: Total messages clustered
+            silhouette_score: Optional silhouette score
+            quality_metrics: Optional dict of quality metrics
+
+        Returns:
+            clustering_run_id: ID of the created clustering run
+        """
+        cursor = self.conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO clustering_runs
+            (method, parameters, n_clusters, n_noise, n_samples,
+             silhouette_score, quality_metrics, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            method,
+            json.dumps(parameters),
+            n_clusters,
+            n_noise,
+            n_samples,
+            silhouette_score,
+            json.dumps(quality_metrics) if quality_metrics else None,
+            int(datetime.now().timestamp())
+        ))
+
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def save_cluster_assignments(
+        self,
+        clustering_run_id: int,
+        message_ids: List[str],
+        cluster_labels: List[int]
+    ):
+        """
+        Save cluster assignments for messages in bulk.
+
+        Args:
+            clustering_run_id: ID from clustering_runs table
+            message_ids: List of message IDs
+            cluster_labels: List of cluster labels (same order as message_ids)
+        """
+        if len(message_ids) != len(cluster_labels):
+            raise ValueError("message_ids and cluster_labels must have same length")
+
+        cursor = self.conn.cursor()
+        timestamp = int(datetime.now().timestamp())
+
+        # Batch insert
+        data = [
+            (clustering_run_id, msg_id, int(label), timestamp)
+            for msg_id, label in zip(message_ids, cluster_labels)
+        ]
+
+        cursor.executemany("""
+            INSERT OR REPLACE INTO message_clusters
+            (clustering_run_id, message_id, cluster_id, created_at)
+            VALUES (?, ?, ?, ?)
+        """, data)
+
+        self.conn.commit()
+        print(f"   💾 Saved {len(data):,} cluster assignments to SQLite")
+
+    def get_cluster_messages(
+        self,
+        clustering_run_id: int,
+        cluster_id: int,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all messages in a specific cluster.
+
+        Args:
+            clustering_run_id: Clustering run ID
+            cluster_id: Cluster ID (-1 for noise)
+            limit: Optional limit on number of messages
+
+        Returns:
+            List of message dictionaries
+        """
+        cursor = self.conn.cursor()
+
+        query = """
+            SELECT m.* FROM messages m
+            JOIN message_clusters mc ON m.id = mc.message_id
+            WHERE mc.clustering_run_id = ? AND mc.cluster_id = ?
+            ORDER BY m.timestamp DESC
+        """
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, (clustering_run_id, cluster_id))
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_clustering_run(self, clustering_run_id: int) -> Optional[Dict[str, Any]]:
+        """Get metadata for a clustering run."""
+        cursor = self.conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM clustering_runs WHERE id = ?
+        """, (clustering_run_id,))
+
+        row = cursor.fetchone()
+        if row:
+            result = dict(row)
+            result['parameters'] = json.loads(result['parameters'])
+            if result['quality_metrics']:
+                result['quality_metrics'] = json.loads(result['quality_metrics'])
+            return result
+        return None
 
     def close(self):
         """Close database connection."""

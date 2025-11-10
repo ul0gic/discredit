@@ -10,7 +10,7 @@
 [![Poetry](https://img.shields.io/badge/Poetry-Dependency%20Management-60A5FA?style=for-the-badge&logo=poetry&logoColor=white)](https://python-poetry.org)
 [![SQLite](https://img.shields.io/badge/SQLite-Source%20of%20Truth-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
 [![Neo4j](https://img.shields.io/badge/Neo4j-Graph%20DB-008CC1?style=for-the-badge&logo=neo4j&logoColor=white)](https://neo4j.com)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--5-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com)
 
 ---
 
@@ -25,8 +25,9 @@ Discredit is a **community intelligence mining system** that analyzes conversati
 - 🔄 **Automated Scraping**: Collect messages from Discord channels and Reddit with full comment tree traversal
 - 🗄️ **Unified Database**: Single source of truth normalizing Discord and Reddit data with smart ID prefixing
 - 🧠 **Semantic Search**: Vector embeddings for finding similar pain points and requests
+- 🔬 **Topic Clustering**: HDBSCAN automatically discovers natural topic groupings from embeddings
 - 🕸️ **Graph Analysis**: Relationship mapping to identify patterns and communities
-- 🤖 **AI-Powered Extraction**: GPT-4 extracts pain points, integrations, and features from conversations
+- 🤖 **AI-Powered Extraction**: GPT-5 extracts pain points, integrations, and features from conversations
 - 📊 **Opportunity Reports**: Data-driven insights with user quotes and frequency metrics
 - ⚡ **Production Ready**: Rate limiting, checkpointing, and resumable scraping
 
@@ -61,7 +62,8 @@ graph TB
 
     subgraph "Analysis Layer"
         Embedder[Embedder<br/>OpenAI API]
-        Extractor[Entity Extractor<br/>GPT-4]
+        Clusterer[Topic Clustering<br/>HDBSCAN]
+        Extractor[Entity Extractor<br/>GPT-5]
         GraphBuilder[Graph Builder]
     end
 
@@ -77,6 +79,9 @@ graph TB
 
     SQLite --> Embedder
     Embedder --> ChromaDB
+
+    ChromaDB --> Clusterer
+    Clusterer --> SQLite
 
     SQLite --> Extractor
     Extractor --> SQLite
@@ -96,6 +101,7 @@ graph TB
     style DS fill:#818cf8,stroke:#a5b4fc,stroke-width:2px,color:#fff
     style RS fill:#fb923c,stroke:#fdba74,stroke-width:2px,color:#fff
     style Embedder fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style Clusterer fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style Extractor fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style GraphBuilder fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style Reports fill:#10b981,stroke:#34d399,stroke-width:2px,color:#fff
@@ -238,8 +244,13 @@ flowchart LR
         C -.link.-> S
     end
 
-    subgraph "Phase 3: Extraction"
-        S --> X[Entity<br/>Extractor<br/>GPT-4]
+    subgraph "Phase 3: Clustering"
+        C --> CL[Topic<br/>Clustering<br/>HDBSCAN]
+        CL --> S
+    end
+
+    subgraph "Phase 4: Extraction"
+        S --> X[Entity<br/>Extractor<br/>GPT-5]
         X --> S
     end
 

@@ -68,6 +68,7 @@ class MessageClusterer:
         self.chromadb_path = chromadb_path or str(Config.CHROMADB_PATH)
 
         self.db = DiscreditDB(self.sqlite_path)
+        self.db.initialize_schema()  # Ensure clustering tables exist
         self.vector_store = VectorStore(self.chromadb_path)
 
         # Data containers
@@ -489,60 +490,60 @@ class MessageClusterer:
     def save_clustering_to_db(
         self,
         result_key: str,
-        table_suffix: str = ''
+        table_suffix: str = ''  # Kept for backward compatibility, not used
     ):
         """
-        Save clustering results to SQLite.
+        Save clustering results to SQLite using proper schema.
 
-        Creates a new table with message_id and cluster_id mapping.
+        Stores run metadata in clustering_runs table and assignments in
+        message_clusters table.
 
         Args:
-            result_key: Which clustering result to save
-            table_suffix: Optional suffix for table name
+            result_key: Which clustering result to save (e.g., 'hdbscan')
+            table_suffix: Deprecated, kept for backward compatibility
+
+        Returns:
+            clustering_run_id: ID of the saved clustering run
         """
         if result_key not in self.results:
             print(f"❌ Result '{result_key}' not found")
-            return
+            return None
 
         result = self.results[result_key]
         labels = result['labels']
 
-        table_name = f"message_clusters{table_suffix}"
+        print(f"\n💾 Saving clustering run to database...")
+        print(f"   Method: {result['method']}")
+        print(f"   Clusters: {result['n_clusters']}, Noise: {result['n_noise']}")
 
-        print(f"\n💾 Saving clustering to SQLite table '{table_name}'...")
+        # Save clustering run metadata
+        clustering_run_id = self.db.save_clustering_run(
+            method=result['method'],
+            parameters=result['parameters'],
+            n_clusters=result['n_clusters'],
+            n_noise=result['n_noise'],
+            n_samples=result['n_samples'],
+            silhouette_score=result.get('silhouette_score'),
+            quality_metrics={
+                'calinski_harabasz': result.get('calinski_harabasz'),
+                'davies_bouldin': result.get('davies_bouldin')
+            }
+        )
 
-        # Create table
-        cursor = self.db.conn.cursor()
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                message_id TEXT PRIMARY KEY,
-                cluster_id INTEGER NOT NULL,
-                method TEXT,
-                parameters TEXT,
-                created_at INTEGER,
-                FOREIGN KEY (message_id) REFERENCES messages(id)
-            )
-        """)
+        print(f"   ✅ Created clustering run #{clustering_run_id}")
 
-        # Insert cluster assignments
-        now = int(datetime.now().timestamp())
-        params_json = json.dumps(result['parameters'])
+        # Save cluster assignments
+        # Handle both numpy arrays and lists
+        msg_ids = self.message_ids.tolist() if hasattr(self.message_ids, 'tolist') else self.message_ids
+        label_list = labels.tolist() if hasattr(labels, 'tolist') else labels
 
-        data = [
-            (self.message_ids[i], int(labels[i]), result['method'], params_json, now)
-            for i in range(len(labels))
-        ]
+        self.db.save_cluster_assignments(
+            clustering_run_id=clustering_run_id,
+            message_ids=msg_ids,
+            cluster_labels=label_list
+        )
 
-        cursor.executemany(f"""
-            INSERT OR REPLACE INTO {table_name}
-            (message_id, cluster_id, method, parameters, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, data)
-
-        self.db.conn.commit()
-
-        print(f"   ✅ Saved {len(data):,} cluster assignments")
-        print(f"   Table: {table_name}")
+        return clustering_run_id
 
 
 def main():
@@ -583,9 +584,8 @@ def main():
     )
     parser.add_argument(
         '--save',
-        type=str,
-        default=None,
-        help='Save clustering to database with table suffix'
+        action='store_true',
+        help='Save clustering results to database (clustering_runs + message_clusters tables)'
     )
     parser.add_argument(
         '--export-samples',
@@ -641,7 +641,8 @@ def main():
     # Save to database
     if args.save and clusterer.results:
         best_result = list(clusterer.results.keys())[0]
-        clusterer.save_clustering_to_db(best_result, table_suffix=args.save)
+        clustering_run_id = clusterer.save_clustering_to_db(best_result)
+        print(f"\n✅ Clustering saved to database (run #{clustering_run_id})")
 
     # Clean up
     clusterer.db.close()
