@@ -290,8 +290,9 @@ class DiscordScraper:
         print(f"Batch size: {batch_size}")
         print(f"{'='*60}\n")
 
-        # Calculate cutoff date
-        cutoff_date = datetime.utcnow() - timedelta(days=months_back * 30)
+        # Calculate cutoff date (timezone-aware to match parsed timestamps)
+        from datetime import timezone
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=months_back * 30)
         cutoff_timestamp = int(cutoff_date.timestamp())
 
         # Set checkpoint start time if new

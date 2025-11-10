@@ -356,8 +356,8 @@ class RedditScraper:
                     comments_buffer = []
                     print(f"\n💾 Checkpoint: {processed_posts} posts, {total_comments} comments\n")
 
-                # Rate limiting - be respectful to Reddit
-                time.sleep(0.5)
+                # Rate limiting - be respectful to Reddit (60 req/min, well under 100 req/min limit)
+                time.sleep(1.0)
 
         except Exception as e:
             error = f"Scraping error: {str(e)}"
