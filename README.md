@@ -25,11 +25,12 @@ Discredit is a **community intelligence mining system** that analyzes conversati
 - 🔄 **Automated Scraping**: Collect messages from Discord channels and Reddit with full comment tree traversal
 - 🗄️ **Unified Database**: Single source of truth normalizing Discord and Reddit data with smart ID prefixing
 - 🧠 **Semantic Search**: Vector embeddings for finding similar pain points and requests
-- 🔬 **Topic Clustering**: HDBSCAN automatically discovers natural topic groupings from embeddings
+- 🏷️ **Taxonomy Classification**: GPT-5 classifies messages into 10 market intelligence categories (pricing, bugs, integrations, features, etc.)
+- 🔬 **Sub-Clustering Analysis**: Embeddings-based clustering within categories for specific opportunity discovery
 - 🕸️ **Graph Analysis**: Relationship mapping to identify patterns and communities
-- 🤖 **AI-Powered Extraction**: GPT-5 extracts pain points, integrations, and features from conversations
+- 🤖 **AI-Powered Extraction**: GPT-5 extracts specific entities and patterns from classified messages
 - 📊 **Opportunity Reports**: Data-driven insights with user quotes and frequency metrics
-- ⚡ **Production Ready**: Rate limiting, checkpointing, and resumable scraping
+- ⚡ **Production Ready**: Async parallel processing, rate limiting, checkpointing, and resumable scraping
 
 ## 🏗️ Architecture
 
@@ -62,7 +63,8 @@ graph TB
 
     subgraph "Analysis Layer"
         Embedder[Embedder<br/>OpenAI API]
-        Clusterer[Topic Clustering<br/>HDBSCAN]
+        Classifier[Taxonomy Classifier<br/>GPT-5]
+        SubCluster[Sub-Clustering<br/>Category Analysis]
         Extractor[Entity Extractor<br/>GPT-5]
         GraphBuilder[Graph Builder]
     end
@@ -80,8 +82,12 @@ graph TB
     SQLite --> Embedder
     Embedder --> ChromaDB
 
-    ChromaDB --> Clusterer
-    Clusterer --> SQLite
+    SQLite --> Classifier
+    Classifier --> SQLite
+
+    SQLite --> SubCluster
+    ChromaDB --> SubCluster
+    SubCluster --> SQLite
 
     SQLite --> Extractor
     Extractor --> SQLite
@@ -101,7 +107,8 @@ graph TB
     style DS fill:#818cf8,stroke:#a5b4fc,stroke-width:2px,color:#fff
     style RS fill:#fb923c,stroke:#fdba74,stroke-width:2px,color:#fff
     style Embedder fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
-    style Clusterer fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style Classifier fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style SubCluster fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style Extractor fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style GraphBuilder fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style Reports fill:#10b981,stroke:#34d399,stroke-width:2px,color:#fff
@@ -118,6 +125,8 @@ SQLite serves as the **single source of truth** with a unified table design that
 erDiagram
     messages ||--o{ extracted_entities : "has"
     messages ||--o{ embeddings_reference : "has"
+    messages ||--o{ message_taxonomy : "classified into"
+    taxonomy_runs ||--o{ message_taxonomy : "contains"
     users ||--o{ messages : "authors"
     messages ||--o{ messages : "replies to"
 
@@ -163,6 +172,25 @@ erDiagram
         string embedding_model "e.g. text-embedding-3-small"
         integer created_at "Unix timestamp"
     }
+
+    taxonomy_runs {
+        integer id PK
+        string model "GPT model used (e.g. gpt-5)"
+        string taxonomy_version "Taxonomy version (e.g. v1.0)"
+        integer n_messages "Total messages processed"
+        integer batch_size "Batch size used"
+        integer total_batches "Number of batches"
+        real processing_time_seconds "Total processing time"
+        integer created_at "Unix timestamp"
+    }
+
+    message_taxonomy {
+        integer id PK
+        integer taxonomy_run_id FK "Classification run"
+        string message_id FK "Classified message"
+        string category "Single category assigned"
+        integer created_at "Unix timestamp"
+    }
 ```
 
 **🎯 Key Design Decisions:**
@@ -172,7 +200,9 @@ erDiagram
 3. 📝 **Type Prefixes for Reddit**: `t3_` = posts, `t1_` = comments
 4. 🧵 **Parent-Child Threading**: `parent_id` field supports Discord replies and Reddit comment trees
 5. 📦 **JSON Metadata**: Platform-specific fields (reactions, upvotes, awards) stored as JSON
-6. ⚡ **No ORM**: Raw SQL for performance and transparency
+6. 🏷️ **Single-Category Taxonomy**: Each message assigned exactly ONE category (no multi-label noise)
+7. 📊 **Taxonomy Run Tracking**: Metadata for each classification run (model, version, performance metrics)
+8. ⚡ **No ORM**: Raw SQL for performance and transparency
 
 ### ⚙️ Application Architecture
 
@@ -244,17 +274,23 @@ flowchart LR
         C -.link.-> S
     end
 
-    subgraph "Phase 3: Clustering"
-        C --> CL[Topic<br/>Clustering<br/>HDBSCAN]
-        CL --> S
+    subgraph "Phase 3: Classification"
+        S --> TC[Taxonomy<br/>Classifier<br/>GPT-5]
+        TC --> S
     end
 
-    subgraph "Phase 4: Extraction"
+    subgraph "Phase 4: Sub-Clustering"
+        S --> SC[Category<br/>Sub-Clusterer<br/>Embeddings]
+        C --> SC
+        SC --> S
+    end
+
+    subgraph "Phase 5: Extraction"
         S --> X[Entity<br/>Extractor<br/>GPT-5]
         X --> S
     end
 
-    subgraph "Phase 4: Graph"
+    subgraph "Phase 6: Graph"
         S --> G[Graph<br/>Builder]
         G --> N[(Neo4j)]
     end
@@ -272,6 +308,8 @@ flowchart LR
     style D fill:#818cf8,stroke:#a5b4fc,stroke-width:2px,color:#fff
     style R fill:#fb923c,stroke:#fdba74,stroke-width:2px,color:#fff
     style E fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style TC fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style SC fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style X fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style G fill:#8b5cf6,stroke:#a78bfa,stroke-width:2px,color:#fff
     style A fill:#06b6d4,stroke:#22d3ee,stroke-width:2px,color:#fff
@@ -282,9 +320,11 @@ flowchart LR
 
 1. 📥 **Collection**: Scrapers → SQLite (unified storage)
 2. 🧠 **Semantic Processing**: SQLite → OpenAI → ChromaDB (vector embeddings)
-3. 🔍 **Entity Extraction**: SQLite → GPT-4 → SQLite (pain points, integrations, features)
-4. 🕸️ **Graph Construction**: SQLite → Neo4j (relationships, communities, patterns)
-5. 📊 **Analysis**: Multi-database queries → Opportunity reports
+3. 🏷️ **Taxonomy Classification**: SQLite → GPT-5 → SQLite (10 market intelligence categories)
+4. 🔬 **Sub-Clustering**: Category messages → ChromaDB embeddings → Specific opportunity clusters
+5. 🔍 **Entity Extraction**: Clusters → GPT-5 → SQLite (specific pain points, integrations, features)
+6. 🕸️ **Graph Construction**: SQLite → Neo4j (relationships, communities, patterns)
+7. 📊 **Analysis**: Multi-database queries → Opportunity reports
 
 ---
 

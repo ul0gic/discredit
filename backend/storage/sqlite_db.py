@@ -152,6 +152,33 @@ class DiscreditDB:
             )
         """)
 
+        # Taxonomy classification runs table - metadata for each taxonomy run
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS taxonomy_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model TEXT NOT NULL,
+                taxonomy_version TEXT NOT NULL,
+                n_messages INTEGER NOT NULL,
+                batch_size INTEGER NOT NULL,
+                total_batches INTEGER NOT NULL,
+                processing_time_seconds REAL,
+                created_at INTEGER NOT NULL
+            )
+        """)
+
+        # Message taxonomy table - category assignments
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS message_taxonomy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                taxonomy_run_id INTEGER NOT NULL,
+                message_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (taxonomy_run_id) REFERENCES taxonomy_runs(id),
+                FOREIGN KEY (message_id) REFERENCES messages(id)
+            )
+        """)
+
         # Create indexes for common query patterns
         self._create_indexes(cursor)
 
@@ -185,6 +212,12 @@ class DiscreditDB:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_run ON message_clusters(clustering_run_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_message ON message_clusters(message_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_clusters_cluster ON message_clusters(cluster_id)")
+
+        # Taxonomy indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_taxonomy_runs_model ON taxonomy_runs(model)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_taxonomy_run ON message_taxonomy(taxonomy_run_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_taxonomy_message ON message_taxonomy(message_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_taxonomy_category ON message_taxonomy(category)")
 
     # ==================== MESSAGES CRUD ====================
 
