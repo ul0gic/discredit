@@ -56,3 +56,8 @@ poetry.lock
 
 # Project Planning (internal documentation)
 .project/
+
+# Research & Testing
+intel/
+lovable-testing/
+test-site/
